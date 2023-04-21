@@ -39,6 +39,7 @@ import okhttp3.Cache
 import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import org.greatfire.envoy.CronetInterceptor
 import retrofit2.Retrofit
 import retrofit2.adapter.rxjava3.RxJava3CallAdapterFactory
 import retrofit2.converter.gson.GsonConverterFactory
@@ -116,8 +117,9 @@ class NetworkModule {
         httpClient: OkHttpClient,
         gson: Gson
     ): Retrofit {
+        val httpClient2 = httpClient.newBuilder().addInterceptor(CronetInterceptor()).build()
         return Retrofit.Builder().baseUrl("https://" + MastodonApi.PLACEHOLDER_DOMAIN)
-            .client(httpClient)
+            .client(httpClient2)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .addCallAdapterFactory(RxJava3CallAdapterFactory.create())
             .addCallAdapterFactory(NetworkResultCallAdapterFactory.create())

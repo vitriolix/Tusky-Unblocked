@@ -16,9 +16,11 @@
 package com.keylesspalace.tusky
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -45,6 +47,7 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.MenuProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
 import androidx.viewpager2.widget.MarginPageTransformer
 import at.connyduck.calladapter.networkresult.fold
@@ -137,6 +140,9 @@ import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.schedulers.Schedulers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+import org.greatfire.envoy.CronetInterceptor
+import org.greatfire.envoy.*
 
 class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInjector, MenuProvider {
     @Inject
@@ -366,7 +372,6 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
             else -> super.onOptionsItemSelected(item)
         }
     }
-
     override fun onResume() {
         super.onResume()
         val currentEmojiPack = preferences.getString(EMOJI_PREFERENCE, "")
@@ -379,6 +384,22 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
             selectedEmojiPack = currentEmojiPack
             recreate()
         }
+
+        System.out.println("FOO - onResume -> start envoy")
+
+        // start cronet here to prevent exception from starting a service when out of focus
+        if (envoyUnused) {
+            System.out.println("FOO - onResume -> direct connection previously worked, don't try to start envoy")
+        } else if (CronetNetworking.cronetEngine() != null) {
+            System.out.println("FOO - onResume -> cronet already running, don't try to start envoy again")
+        } else if (waitingForEnvoy) {
+            System.out.println("FOO - onResume -> already processing urls, don't try to start envoy again")
+        } else {
+            // run envoy setup (fetches and validate urls)
+            System.out.println("FOO - onResume -> start envoy to process urls")
+            waitingForEnvoy = true
+            envoyInit()
+        }
     }
 
     override fun onStart() {
@@ -387,6 +408,12 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
         if (binding.mainDrawerLayout.isOpen) {
             binding.mainDrawerLayout.closeDrawer(GravityCompat.START, false)
         }
+
+        LocalBroadcastManager.getInstance(this).registerReceiver(mBroadcastReceiver, IntentFilter().apply {
+            addAction(ENVOY_BROADCAST_VALIDATION_SUCCEEDED)
+            addAction(ENVOY_BROADCAST_VALIDATION_FAILED)
+            addAction(ENVOY_BROADCAST_VALIDATION_ENDED)
+        })
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -1052,6 +1079,83 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
         private const val DRAWER_ITEM_ANNOUNCEMENTS: Long = 14
         const val REDIRECT_URL = "redirectUrl"
         const val OPEN_DRAFTS = "draft"
+    }
+
+    private val DIRECT_URL = arrayListOf<String>()
+
+    private var waitingForEnvoy = false
+    private var envoyUnused = false
+
+    // this receiver should be triggered by a success or failure broadcast from the
+    // NetworkIntentService (indicating whether submitted urls were valid or invalid)
+    private val mBroadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null && context != null) {
+                if (intent.action == ENVOY_BROADCAST_VALIDATION_SUCCEEDED) {
+                    val validUrl = intent.getStringExtra(ENVOY_DATA_URL_SUCCEEDED)
+                    if (validUrl.isNullOrEmpty()) {
+                        System.out.println("FOO - broadcastReceiver -> received a valid url that was empty or null")
+                    } else if (waitingForEnvoy) {
+                        // select the first valid url that is received (assumed to have the lowest latency)
+                        waitingForEnvoy = false
+                        if (DIRECT_URL.contains(validUrl)) {
+                            System.out.println("FOO - broadcastReceiver -> got direct url: " + validUrl + ", don't need to start engine")
+                            // set flag so resuming activity doesn't trigger another envoy check
+                            envoyUnused = true
+                        } else {
+                            System.out.println("FOO - broadcastReceiver -> found a valid url: " + validUrl + ", start engine")
+                            CronetNetworking.initializeCronetEngine(context, validUrl)
+                        }
+                    } else {
+                        System.out.println("FOO - broadcastReceiver -> already selected a valid url, ignore valid url: " + validUrl)
+                    }
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_FAILED) {
+                    val invalidUrl = intent.getStringExtra(ENVOY_DATA_URL_FAILED)
+                    if (invalidUrl.isNullOrEmpty()) {
+                        System.out.println("FOO - broadcastReceiver -> received an invalid url that was empty or null")
+                    } else {
+                        System.out.println("FOO - broadcastReceiver -> got invalid url: " + invalidUrl)
+                    }
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_ENDED) {
+                    val cause = intent.getStringExtra(ENVOY_DATA_VALIDATION_ENDED_CAUSE)
+                    if (cause.isNullOrEmpty()) {
+                        System.out.println("FOO - broadcastReceiver -> received an envoy validation ended broadcast with an invalid cause")
+                    } else {
+                        System.out.println("FOO - broadcastReceiver -> received an envoy validation ended broadcast with a cause: " + cause)
+                    }
+                    // set flag so resuming activity doesn't trigger another envoy check
+                    waitingForEnvoy = false
+                } else {
+                    System.out.println("FOO - broadcastReceiver -> received unexpected intent: " + intent.action)
+                }
+            } else {
+                System.out.println("FOO - broadcastReceiver -> receiver triggered but context or intent was null")
+            }
+
+        }
+    }
+
+    fun envoyInit() {
+
+        val listOfUrls = mutableListOf<String>()
+        listOfUrls.add("https://abc.28211.cc/gfd/")
+        listOfUrls.add("https://abc.hxun.org/gfd/")
+        listOfUrls.add("https://abc.afrt.org/gfd/")
+
+        val urlSources = mutableListOf<String>()
+
+        System.out.println("FOO - envoyInit -> submit urls")
+
+        NetworkIntentService.submit(
+            this@MainActivity,
+            listOfUrls,
+            DIRECT_URL,
+            "",
+            urlSources,
+            1,
+            1,
+            1
+        )
     }
 }
 

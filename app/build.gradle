@@ -82,13 +82,17 @@ android {
     sourceSets {
         androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
     }
+    packagingOptions {
+        // doNotStrip("**/libcronet*.so")
+        // jniLibs.keepDebugSymbols.add("**/libcronet*.so")
+        jniLibs.keepDebugSymbols.add("**/libsslocal.so")
+    }
 
     // Exclude unneeded files added by libraries
     packagingOptions.resources.excludes += [
             'LICENSE_OFL',
             'LICENSE_UNICODE',
     ]
-
     bundle {
         language {
             // bundle all languages in every apk so the dynamic language switching works
@@ -186,4 +190,13 @@ dependencies {
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.androidx.room.testing
     androidTestImplementation libs.androidx.test.junit
+
+    // switch to local files if needed to support development
+    implementation(files("libs/cronet-debug.aar"))
+    implementation(files("libs/envoy-debug.aar"))
+    // implementation files('libs/IEnvoyProxy.aar')
+    // use maven dependencies to support automation
+//    implementation("org.greatfire.envoy:cronet:102.0.5005.41")
+//    implementation("org.greatfire:envoy:102.0.5005.195.2")
+    implementation("org.greatfire:IEnvoyProxy:1.3.1")
 }
