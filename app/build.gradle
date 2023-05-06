@@ -186,4 +186,13 @@ dependencies {
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.androidx.room.testing
     androidTestImplementation libs.androidx.test.junit
+
+    // use maven dependencies to build releases and support automation
+//    implementation(libs.cronet)
+//    implementation(libs.envoy)
+//    implementation(libs.proxy)
+    // switch to local files if needed to support development
+     implementation(files("libs/cronet-debug.aar"))
+     implementation(files("libs/envoy-debug.aar"))
+//     implementation files('libs/IEnvoyProxy.aar')
 }

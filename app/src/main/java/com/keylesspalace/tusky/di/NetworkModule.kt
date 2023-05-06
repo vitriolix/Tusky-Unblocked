@@ -39,10 +39,13 @@ import okhttp3.Cache
 import okhttp3.OkHttp
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import org.greatfire.envoy.CronetInterceptor
+import org.greatfire.envoy.CronetNetworking
 import retrofit2.Retrofit
 import retrofit2.adapter.rxjava3.RxJava3CallAdapterFactory
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.create
+import java.io.IOException
 import java.net.IDN
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -63,6 +66,7 @@ class NetworkModule {
         .registerTypeAdapter(Date::class.java, Rfc3339DateJsonAdapter())
         .create()
 
+    private val LOG_TAG = "TuskyUnblocked"
     @Provides
     @Singleton
     fun providesHttpClient(
@@ -89,6 +93,19 @@ class NetworkModule {
                     .build()
                 chain.proceed(requestWithUserAgent)
             }
+            .addInterceptor { chain ->
+                // data sources are bound at startup with this instance of OkHttpClient so
+                // we need an interceptor to block connections until CronetEngine is ready
+                if (CronetNetworking.cronetEngine() == null) {
+                    Log.w(LOG_TAG, "CronetEngine has not been initialized, intercept and throw exception")
+                    throw IOException("Envoy isn't running, can't connect")
+                } else {
+                    Log.d(LOG_TAG, "CronetEngine has been initialized, intercept and proceed")
+                    chain.proceed(chain.request())
+                }
+            }
+            // CronetInterceptor will be bypassed if CronetEngine has not been initialized
+            .addInterceptor(CronetInterceptor())
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .cache(Cache(context.cacheDir, cacheSize))

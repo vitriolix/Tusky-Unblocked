@@ -16,9 +16,11 @@
 package com.keylesspalace.tusky
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -45,6 +47,7 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.MenuProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
 import androidx.viewpager2.widget.MarginPageTransformer
 import at.connyduck.calladapter.networkresult.fold
@@ -136,6 +139,14 @@ import de.c1710.filemojicompat_ui.helpers.EMOJI_PREFERENCE
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.schedulers.Schedulers
 import kotlinx.coroutines.launch
+import org.greatfire.envoy.CronetNetworking
+import org.greatfire.envoy.ENVOY_BROADCAST_VALIDATION_ENDED
+import org.greatfire.envoy.ENVOY_BROADCAST_VALIDATION_FAILED
+import org.greatfire.envoy.ENVOY_BROADCAST_VALIDATION_SUCCEEDED
+import org.greatfire.envoy.ENVOY_DATA_URL_FAILED
+import org.greatfire.envoy.ENVOY_DATA_URL_SUCCEEDED
+import org.greatfire.envoy.ENVOY_DATA_VALIDATION_ENDED_CAUSE
+import org.greatfire.envoy.NetworkIntentService
 import javax.inject.Inject
 
 class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInjector, MenuProvider {
@@ -345,6 +356,9 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
 
         // "Post failed" dialog should display in this activity
         draftsAlert.observeInContext(this, true)
+
+        // envoy integration:
+
     }
 
     override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
@@ -369,6 +383,21 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
 
     override fun onResume() {
         super.onResume()
+
+        // start envoy here to prevent exception from starting a service when out of focus
+        if (envoyUnused) {
+            Log.w(TUSKY_UNBLOCKED_TAG, "direct connection previously worked, don't try to start envoy")
+        } else if (CronetNetworking.cronetEngine() != null) {
+            Log.w(TUSKY_UNBLOCKED_TAG, "cronet already running, don't try to start envoy again")
+        } else if (waitingForEnvoy) {
+            Log.w(TUSKY_UNBLOCKED_TAG, "already processing urls, don't try to start envoy again")
+        } else {
+            // run envoy setup (fetches and validate urls)
+            Log.d(TUSKY_UNBLOCKED_TAG, "start envoy to process urls")
+            waitingForEnvoy = true
+            envoyInit()
+        }
+
         val currentEmojiPack = preferences.getString(EMOJI_PREFERENCE, "")
         if (currentEmojiPack != selectedEmojiPack) {
             Log.d(
@@ -387,6 +416,15 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
         if (binding.mainDrawerLayout.isOpen) {
             binding.mainDrawerLayout.closeDrawer(GravityCompat.START, false)
         }
+
+        // moved to start/stop to avoid an issue with registering multiple instances of the receiver when app is swiped away
+        Log.d(TUSKY_UNBLOCKED_TAG, "start/register broadcast receiver")
+        // register to receive test results
+        LocalBroadcastManager.getInstance(this).registerReceiver(mBroadcastReceiver, IntentFilter().apply {
+            addAction(ENVOY_BROADCAST_VALIDATION_SUCCEEDED)
+            addAction(ENVOY_BROADCAST_VALIDATION_FAILED)
+            addAction(ENVOY_BROADCAST_VALIDATION_ENDED)
+        })
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -1052,6 +1090,117 @@ class MainActivity : BottomSheetActivity(), ActionButtonActivity, HasAndroidInje
         private const val DRAWER_ITEM_ANNOUNCEMENTS: Long = 14
         const val REDIRECT_URL = "redirectUrl"
         const val OPEN_DRAFTS = "draft"
+    }
+
+    private val DIRECT_URL = arrayListOf<String>()
+
+    private var waitingForEnvoy = false
+    private var envoyUnused = false // FIXME this never gets read
+    private val TUSKY_UNBLOCKED_TAG = "TuskyUnblocked"
+    // this receiver should be triggered by a success or failure broadcast from the
+    // NetworkIntentService (indicating whether submitted urls were valid or invalid)
+    private val mBroadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null && context != null) {
+                if (intent.action == ENVOY_BROADCAST_VALIDATION_SUCCEEDED) {
+                    val validUrl = intent.getStringExtra(ENVOY_DATA_URL_SUCCEEDED)
+                    if (validUrl.isNullOrEmpty()) {
+                        Log.w(TUSKY_UNBLOCKED_TAG, "received a valid url that was empty or null")
+                    } else if (waitingForEnvoy) {
+                        // select the first valid url that is received (assumed to have the lowest latency)
+                        waitingForEnvoy = false
+                        if (DIRECT_URL.contains(validUrl)) {
+                            Log.d(TUSKY_UNBLOCKED_TAG, "received a direct url, don't need to start engine")
+                            // set flag so resuming activity doesn't trigger another envoy check
+                            envoyUnused = true
+                        } else {
+                            Log.d(TUSKY_UNBLOCKED_TAG, "received a valid url, start engine")
+                            CronetNetworking.initializeCronetEngine(context, validUrl)
+                        }
+                        // after starting CronetEngine, sync feeds
+                        // TODO Don't sync feed until here
+                    } else {
+                        Log.d(TUSKY_UNBLOCKED_TAG, "already selected a valid url, ignore additional urls")
+                    }
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_FAILED) {
+                    val invalidUrl = intent.getStringExtra(ENVOY_DATA_URL_FAILED)
+                    if (invalidUrl.isNullOrEmpty()) {
+                        Log.w(TUSKY_UNBLOCKED_TAG, "received an invalid url that was empty or null")
+                    } else {
+                        Log.w(TUSKY_UNBLOCKED_TAG, "received an invalid url")
+                    }
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_ENDED) {
+                    val cause = intent.getStringExtra(ENVOY_DATA_VALIDATION_ENDED_CAUSE)
+                    if (cause.isNullOrEmpty()) {
+                        Log.e(TUSKY_UNBLOCKED_TAG, "received an envoy validation ended broadcast with an invalid cause")
+                    } else {
+                        Log.e(TUSKY_UNBLOCKED_TAG, "received an envoy validation ended broadcast with a cause: " + cause)
+                    }
+                    // set flag so resuming activity doesn't trigger another envoy check
+                    waitingForEnvoy = false
+                    // TODO - if CronetEngine can't be started, do we attempt to sync feeds anyway?
+                } else {
+                    Log.w(TUSKY_UNBLOCKED_TAG, "received unexpected intent: " + intent.action)
+                }
+            } else {
+                Log.w(TUSKY_UNBLOCKED_TAG, "receiver triggered but context or intent was null")
+            }
+        }
+    }
+
+
+    // this receiver should be triggered by a success or failure broadcast from the
+    // NetworkIntentService (indicating whether submitted urls were valid or invalid)
+    private val testmBroadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent != null && context != null) {
+                if (intent.action == ENVOY_BROADCAST_VALIDATION_SUCCEEDED) {
+                    val validUrl = intent.getStringExtra(ENVOY_DATA_URL_SUCCEEDED)
+                    if (validUrl.isNullOrEmpty()) {
+                    } else if (waitingForEnvoy) {
+                        // select the first valid url that is received (assumed to have the lowest latency)
+                        waitingForEnvoy = false
+                        if (DIRECT_URL.contains(validUrl)) {
+                            // set flag so resuming activity doesn't trigger another envoy check
+                            envoyUnused = true
+                        } else {
+                            CronetNetworking.initializeCronetEngine(context, validUrl)
+                        }
+                        // after starting CronetEngine, sync feeds
+                        // TODO Don't sync feed until here
+                    }
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_FAILED) {
+                    val invalidUrl = intent.getStringExtra(ENVOY_DATA_URL_FAILED)
+                } else if (intent.action == ENVOY_BROADCAST_VALIDATION_ENDED) {
+                    val cause = intent.getStringExtra(ENVOY_DATA_VALIDATION_ENDED_CAUSE)
+                    // set flag so resuming activity doesn't trigger another envoy check
+                    waitingForEnvoy = false
+                }
+            }
+        }
+    }
+
+    fun envoyInit() {
+
+        val listOfUrls = mutableListOf<String>()
+        listOfUrls.add("url_1")
+        listOfUrls.add("url_2")
+        listOfUrls.add("url_3")
+
+        val urlSources = mutableListOf<String>()
+
+        Log.d(TUSKY_UNBLOCKED_TAG, "submit urls")
+
+        NetworkIntentService.submit(
+            this@MainActivity,
+            listOfUrls,
+            DIRECT_URL,
+            "",
+            urlSources,
+            1,
+            1,
+            1
+        )
     }
 }
 
