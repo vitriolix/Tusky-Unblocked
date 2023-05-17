@@ -59,6 +59,7 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
 kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 ktlint = "org.jlleitschuh.gradle.ktlint:11.3.1"
+hiddensecrets = "com.klaxit.hiddensecrets:0.2.1"
 
 [libraries]
 android-material = { module = "com.google.android.material:material", version.ref = "material" }

@@ -115,6 +115,13 @@ android {
                 "${variant.flavorName}_${buildType.name}.apk"
         }
     }
+
+    // Enable NDK build
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+        }
+    }
 }
 
 kapt {
