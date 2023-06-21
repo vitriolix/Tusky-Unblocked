@@ -5,6 +5,14 @@
     <application
         android:icon="@mipmap/ic_launcher"
         >
+
+        <service
+            android:name="org.greatfire.envoy.ShadowsocksService"
+            android:exported="false"
+            android:isolatedProcess="false" />
+        <service
+            android:name="org.greatfire.envoy.NetworkIntentService"
+            android:exported="false" />
     </application>
 
 </manifest>

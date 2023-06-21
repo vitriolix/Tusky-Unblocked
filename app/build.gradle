@@ -189,4 +189,13 @@ dependencies {
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.androidx.room.testing
     androidTestImplementation libs.androidx.test.junit
+
+    // switch to local files if needed to support development
+    // implementation files('libs/cronet-debug.aar')
+    // implementation files('libs/envoy-debug.aar')
+    // implementation files('libs/IEnvoyProxy.aar')
+    // use maven dependencies to support automation
+    implementation 'org.greatfire.envoy:cronet:107.0.5304.150-1'
+    implementation 'org.greatfire:envoy:107.0.5304.150.1'
+    implementation 'org.greatfire:IEnvoyProxy:1.4.2'
 }
