@@ -10,9 +10,9 @@ apply from: 'getGitSha.gradle'
 final def gitSha = ext.getGitSha()
 
 // The app name
-final def APP_NAME = "Tusky"
+final def APP_NAME = "Tusky Unblocked"
 // The application id. Must be unique, e.g. based on your domain
-final def APP_ID = "com.keylesspalace.tusky"
+final def APP_ID = "org.greatfire.tusky.unblocked"
 // url of a custom app logo. Recommended size at least 600x600. Keep empty to use the Tusky elephant friend.
 final def CUSTOM_LOGO_URL = ""
 // e.g. mastodon.social. Keep empty to not suggest any instance on the signup screen
@@ -54,6 +54,9 @@ android {
             resValue "string", "app_name", APP_NAME + " Test"
             applicationIdSuffix ".test"
             versionNameSuffix "-" + gitSha
+        }
+        unblocked {
+            applicationIdSuffix ".unblocked"
         }
     }
 
@@ -186,4 +189,13 @@ dependencies {
     androidTestImplementation libs.espresso.core
     androidTestImplementation libs.androidx.room.testing
     androidTestImplementation libs.androidx.test.junit
+
+    // switch to local files if needed to support development
+    // implementation files('libs/cronet-debug.aar')
+    // implementation files('libs/envoy-debug.aar')
+    // implementation files('libs/IEnvoyProxy.aar')
+    // use maven dependencies to support automation
+    implementation 'org.greatfire.envoy:cronet:107.0.5304.150-1'
+    implementation 'org.greatfire:envoy:107.0.5304.150.1'
+    implementation 'org.greatfire:IEnvoyProxy:1.4.2'
 }

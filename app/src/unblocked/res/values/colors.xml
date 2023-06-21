@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="unblocked_purple_dark">#361659</color>
+    <color name="unblocked_purple">#673CA7</color>
+    <color name="unblocked_purple_light">#9978CA</color>
+
+    <color name="tusky_blue">@color/unblocked_purple_light</color> <!-- switching light and normal so the buttons and text showup in dark mode -->
+    <color name="tusky_blue_light">@color/unblocked_purple</color>
+
+    <color name="notification_color">@color/unblocked_purple_light</color>
+
+    <!-- colors used in the app icon -->
+    <color name="icon_background">@color/unblocked_purple</color>
+    <color name="icon_highlight">@color/unblocked_purple_light</color>
+</resources>
